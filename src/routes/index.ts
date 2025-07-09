@@ -13,7 +13,7 @@ export function setupRoutes(container: AwilixContainer<AppContainer>): Router {
 
   router.post("/api/token", authController.login);
 
-  router.get("/sse", (req, res) => sseController.handleSSEConnection(req, res));
+  router.get("/live/:gameId", (req, res) => sseController.handleSSEConnection(req, res));
 
   return router;
 }

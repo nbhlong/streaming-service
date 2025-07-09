@@ -8,7 +8,8 @@ const run = async () => {
   const configuration = new Configuration();
   await configuration.configureDatabaseAndSentry(appConfigs);
   const container = new ContainerRegistry().register();
-
+  const videoService = container.resolve("videoService");
+  await videoService.start();
   const app = express();
   app.use(express.json());
   app.set("port", appConfigs.hostingPort);

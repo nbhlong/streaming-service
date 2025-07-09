@@ -1,12 +1,15 @@
 import { Response } from "express";
 import dayjs from "dayjs";
+import { ScheduleService } from "./schedule-service";
+import { AppContainer } from "../types";
 
-export type SSEClient = { res: Response };
+export type SSEClient = { res: Response; gameId: string };
 
 export interface Video {
   url: string;
   length: number;
   startTime: Date;
+  gameId: string;
 }
 
 export interface VideoPayload {
@@ -15,65 +18,59 @@ export interface VideoPayload {
   videoPlayingTime: number;
   videoLength: number;
   message?: string;
+  gameId?: string;
 }
 
 export class SSEService {
   private clients: SSEClient[] = [];
-  private currentVideo: Video | null = null;
   private intervalId: NodeJS.Timeout | null = null;
+  private readonly scheduleService: ScheduleService;
 
-  constructor() {
-    this.startVideoGeneration();
+  constructor(container: AppContainer) {
+    this.scheduleService = container.scheduleService;
   }
 
-  private startVideoGeneration(): void {
-    const generateVideo = (): void => {
-      const video: Video = {
-        url: "https://cdn.example.com/v/vid001.m3u8",
-        length: 30,
-        startTime: new Date(),
+  broadcastVideo(productCode: string, currentEvent: any, message: string): void {
+    const clientsForProduct = this.clients.filter((client) => client.gameId === productCode);
+    console.log(
+      `Sent video to ${clientsForProduct.length} client(s) for product: ${productCode} with eventID: ${currentEvent.eventID} and message: ${message}`
+    );
+
+    clientsForProduct.forEach((client) => {
+      const payload: any = {
+        eventId: currentEvent.eventID,
+        videoUrl: currentEvent.playlist,
+        videoStartTime: currentEvent.scheduleStartTs,
+        videoPlayingTime: 0,
+        message: message,
       };
 
-      this.currentVideo = video;
-      this.broadcastVideo(video);
-    };
-
-    generateVideo();
-    this.intervalId = setInterval(generateVideo, 60 * 1000);
+      client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    });
   }
 
-  private broadcastVideo(video: Video): void {
-    const payload: VideoPayload = {
-      videoUrl: video.url,
-      videoStartTime: video.startTime.toISOString(),
-      videoPlayingTime: 0,
-      videoLength: video.length,
-    };
+  public async addClient(res: Response, gameId: string): Promise<void> {
+    this.clients.push({ res, gameId });
 
-    const data = `data: ${JSON.stringify(payload)}\n\n`;
-    this.clients.forEach((client) => client.res.write(data));
-    console.log(`📢 Sent video to ${this.clients.length} client(s)`);
-  }
+    // if (video) {
+    //   const now = dayjs();
+    //   const secondsPassed = now.diff(video.startTime, "second");
 
-  public addClient(res: Response): void {
-    this.clients.push({ res });
+    //   const payload: VideoPayload = {
+    //     message: "Broadcasted video on first connection",
+    //     videoUrl: video.url,
+    //     videoStartTime: video.startTime.toISOString(),
+    //     videoLength: video.length,
+    //     videoPlayingTime: secondsPassed,
+    //     gameId: gameId,
+    //   };
 
-    // Send current video immediately if available
-    if (this.currentVideo) {
-      const now = dayjs();
-      const secondsPassed = now.diff(this.currentVideo.startTime, "second");
-
-      const payload: VideoPayload = {
-        message: "Broadcasted video on first connection",
-        videoUrl: this.currentVideo.url,
-        videoStartTime: this.currentVideo.startTime.toISOString(),
-        videoLength: this.currentVideo.length,
-        videoPlayingTime: secondsPassed,
-      };
-
-      console.log("Broadcasted video on first connection");
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    }
+    //   console.log(`Broadcasted video on first connection for game ${gameId}`);
+    //   res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    // } else {
+    //   res.write(`data: ${JSON.stringify({ message: "No video found for game" })}\n\n`);
+    //   res.end();
+    // }
   }
 
   public removeClient(res: Response): void {
@@ -82,6 +79,10 @@ export class SSEService {
 
   public getClientCount(): number {
     return this.clients.length;
+  }
+
+  public getClientCountForGame(gameId: string): number {
+    return this.clients.filter((client) => client.gameId === gameId).length;
   }
 
   public cleanup(): void {
