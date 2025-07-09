@@ -2,6 +2,7 @@ import { Response } from "express";
 import dayjs from "dayjs";
 import { ScheduleService } from "./schedule-service";
 import { AppContainer } from "../types";
+import { StreamingData } from "./streaming-data";
 
 export type SSEClient = { res: Response; gameId: string };
 
@@ -24,10 +25,10 @@ export interface VideoPayload {
 export class SSEService {
   private clients: SSEClient[] = [];
   private intervalId: NodeJS.Timeout | null = null;
-  private readonly scheduleService: ScheduleService;
+  private readonly streamingData: StreamingData;
 
   constructor(container: AppContainer) {
-    this.scheduleService = container.scheduleService;
+    this.streamingData = container.streamingData;
   }
 
   broadcastVideo(productCode: string, currentEvent: any, message: string): void {
@@ -51,26 +52,30 @@ export class SSEService {
 
   public async addClient(res: Response, gameId: string): Promise<void> {
     this.clients.push({ res, gameId });
+    const currentEvent = this.streamingData.currentEvents[gameId];
+    const currentEventDetail = currentEvent.eventDetails[currentEvent.index];
 
-    // if (video) {
-    //   const now = dayjs();
-    //   const secondsPassed = now.diff(video.startTime, "second");
+    if (currentEventDetail) {
+      const now = dayjs();
+      const secondsPassed = now.diff(currentEventDetail.scheduleStartTs, "second");
 
-    //   const payload: VideoPayload = {
-    //     message: "Broadcasted video on first connection",
-    //     videoUrl: video.url,
-    //     videoStartTime: video.startTime.toISOString(),
-    //     videoLength: video.length,
-    //     videoPlayingTime: secondsPassed,
-    //     gameId: gameId,
-    //   };
+      const payload: VideoPayload = {
+        message: "Broadcasted video on first connection",
+        videoUrl: currentEventDetail.playlist,
+        videoStartTime: currentEventDetail.scheduleStartTs,
+        videoLength: currentEventDetail.scheduleDuration,
+        videoPlayingTime: secondsPassed,
+        gameId: gameId,
+      };
 
-    //   console.log(`Broadcasted video on first connection for game ${gameId}`);
-    //   res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    // } else {
-    //   res.write(`data: ${JSON.stringify({ message: "No video found for game" })}\n\n`);
-    //   res.end();
-    // }
+      console.log(`Broadcasted video on first connection for game ${gameId}`);
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    }
+
+    if (!currentEvent) {
+      res.write(`data: ${JSON.stringify({ message: "No video found for game" })}\n\n`);
+      res.end();
+    }
   }
 
   public removeClient(res: Response): void {

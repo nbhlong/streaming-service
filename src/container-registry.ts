@@ -8,6 +8,7 @@ import { SSEController } from "./controllers/sse-controller";
 import { HealthController } from "./controllers/health-controller";
 import { logger } from "sc-common";
 import { VideoService } from "./services/video-service";
+import { StreamingData } from "./services/streaming-data";
 
 export class ContainerRegistry {
   container: AwilixContainer<AppContainer>;
@@ -25,6 +26,7 @@ export class ContainerRegistry {
       scheduleService: asClass(ScheduleService).singleton(),
       logService: asValue(logger),
       videoService: asClass(VideoService).singleton(),
+      streamingData: asClass(StreamingData).singleton(),
     });
 
     this.container.register({
