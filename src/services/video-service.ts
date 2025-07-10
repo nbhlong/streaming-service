@@ -78,7 +78,10 @@ export class VideoService {
     }
 
     setTimeout(async () => {
-      const updateEvent = this.streamingData.currentEvents[productCode];
+      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
+        this.streamingData.currentEvents[productCode].eventID
+      );
+      this.streamingData.currentEvents[productCode] = updateEvent;
 
       this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "odds available");
     }, delay);
@@ -92,7 +95,10 @@ export class VideoService {
     }
 
     setTimeout(async () => {
-      const updateEvent = this.streamingData.currentEvents[productCode];
+      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
+        this.streamingData.currentEvents[productCode].eventID
+      );
+      this.streamingData.currentEvents[productCode] = updateEvent;
       this.streamingData.currentEvents[productCode].index = index;
 
       this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "video info available");
@@ -107,7 +113,10 @@ export class VideoService {
     }
 
     setTimeout(async () => {
-      const updateEvent = this.streamingData.currentEvents[productCode];
+      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
+        this.streamingData.currentEvents[productCode].eventID
+      );
+      this.streamingData.currentEvents[productCode] = updateEvent;
 
       this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "result available");
 
