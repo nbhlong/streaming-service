@@ -9,6 +9,7 @@ import { HealthController } from "./controllers/health-controller";
 import { logger } from "sc-common";
 import { VideoService } from "./services/video-service";
 import { StreamingData } from "./services/streaming-data";
+import { BroadcastScheduler } from "./services/broadcast-scheduler";
 
 export class ContainerRegistry {
   container: AwilixContainer<AppContainer>;
@@ -27,12 +28,13 @@ export class ContainerRegistry {
       logService: asValue(logger),
       videoService: asClass(VideoService).singleton(),
       streamingData: asClass(StreamingData).singleton(),
+      broadcastScheduler: asClass(BroadcastScheduler).singleton(),
     });
 
     this.container.register({
-      authController: asClass(AuthController).transient(),
-      sseController: asClass(SSEController).transient(),
-      healthController: asClass(HealthController).transient(),
+      authController: asClass(AuthController).singleton(),
+      sseController: asClass(SSEController).singleton(),
+      healthController: asClass(HealthController).singleton(),
     });
 
     return this.container;

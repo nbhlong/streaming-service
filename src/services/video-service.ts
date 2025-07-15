@@ -4,18 +4,21 @@ import { ScheduleService } from "./schedule-service";
 import cron from "cron";
 import { SSEService } from "./sse-service";
 import { StreamingData } from "./streaming-data";
+import { BroadcastScheduler } from "./broadcast-scheduler";
 
 export class VideoService {
   private readonly scheduleService: ScheduleService;
   private readonly logService: typeof logger;
   private readonly sseService: SSEService;
   private readonly streamingData: StreamingData;
+  private readonly broadcastScheduler: BroadcastScheduler;
 
   constructor(container: AppContainer) {
     this.scheduleService = container.scheduleService;
     this.logService = container.logService;
     this.sseService = container.sseService;
     this.streamingData = container.streamingData;
+    this.broadcastScheduler = container.broadcastScheduler;
   }
 
   async start() {
@@ -71,54 +74,45 @@ export class VideoService {
   }
 
   handleOddsAvailableForEventDetail(eventDetail: any, index: number, productCode: string) {
-    const delay = new Date(eventDetail.oddsAvailableTs).getTime() - new Date().getTime();
+    const scheduledTime = new Date(eventDetail.oddsAvailableTs);
+    const jobId = this.generateJobId(productCode, this.streamingData.currentEvents[productCode].eventID, index, "odds");
 
-    if (delay < 0) {
-      return;
-    }
-
-    setTimeout(async () => {
+    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
       const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
         this.streamingData.currentEvents[productCode].eventID
       );
       this.streamingData.currentEvents[productCode] = updateEvent;
 
-      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "odds available");
-    }, delay);
+      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "odds available", index);
+    });
   }
 
   handleVideoInfoAvailableForEventDetail(eventDetail: any, index: number, productCode: string) {
-    const delay = new Date(eventDetail.scheduleStartTs).getTime() - new Date().getTime();
+    const scheduledTime = new Date(eventDetail.scheduleStartTs);
+    const jobId = this.generateJobId(productCode, this.streamingData.currentEvents[productCode].eventID, index, "video");
 
-    if (delay < 0) {
-      return;
-    }
-
-    setTimeout(async () => {
+    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
       const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
         this.streamingData.currentEvents[productCode].eventID
       );
       this.streamingData.currentEvents[productCode] = updateEvent;
       this.streamingData.currentEvents[productCode].index = index;
 
-      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "video info available");
-    }, delay);
+      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "video info available", index);
+    });
   }
 
   handleResultAvailableForEventDetail(eventDetail: any, index: number, productCode: string) {
-    const delay = new Date(eventDetail.resultsAvailableTs).getTime() - new Date().getTime();
+    const scheduledTime = new Date(eventDetail.resultsAvailableTs);
+    const jobId = this.generateJobId(productCode, this.streamingData.currentEvents[productCode].eventID, index, "result");
 
-    if (delay < 0) {
-      return;
-    }
-
-    setTimeout(async () => {
+    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
       const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
         this.streamingData.currentEvents[productCode].eventID
       );
       this.streamingData.currentEvents[productCode] = updateEvent;
 
-      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "result available");
+      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "result available", index);
 
       if (
         index === updateEvent.eventDetails.length - 1 &&
@@ -127,7 +121,7 @@ export class VideoService {
         this.streamingData.currentEvents[productCode] = this.streamingData.nextEvents[productCode];
         this.scheduleCurrentEvents(productCode);
       }
-    }, delay);
+    });
   }
 
   async getNextEventsForEachProduct() {
@@ -152,5 +146,23 @@ export class VideoService {
     });
 
     return events;
+  }
+
+  getBroadcastData() {
+    return this.streamingData.currentEvents.map((event: any) => {
+      return {
+        productCode: event.productCode,
+        eventID: event.eventID,
+        index: event.index,
+      };
+    });
+  }
+
+  cleanup() {
+    this.broadcastScheduler.stopAll();
+  }
+
+  private generateJobId(productCode: string, eventId: number, index: number, jobType: string) {
+    return `${productCode}_${eventId}_${index}_${jobType}`;
   }
 }

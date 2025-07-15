@@ -9,9 +9,9 @@ export function setupRoutes(container: AwilixContainer<AppContainer>): Router {
   const healthController = container.resolve("healthController");
   const authController = container.resolve("authController");
 
-  router.get("/", healthController.healthCheck);
+  router.get("/", (req, res) => healthController.healthCheck(req, res));
 
-  router.post("/api/token", authController.login);
+  router.post("/api/token", (req, res) => authController.login(req, res));
 
   router.get("/live/:gameId", (req, res) => sseController.handleSSEConnection(req, res));
 

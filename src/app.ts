@@ -16,9 +16,32 @@ const run = async () => {
 
   app.use(setupRoutes(container));
 
-  app.listen(appConfigs.hostingPort, () => {
+  const server = app.listen(appConfigs.hostingPort, () => {
     console.log(`SSE server running at http://localhost:${appConfigs.hostingPort}`);
   });
+
+  // Graceful shutdown
+  const gracefulShutdown = (signal: string) => {
+    console.log(`Received ${signal}. Starting graceful shutdown...`);
+
+    // Clean up broadcast jobs
+    videoService.cleanup();
+
+    server.close(() => {
+      console.log("HTTP server closed");
+      process.exit(0);
+    });
+
+    // Force exit after 10 seconds
+    setTimeout(() => {
+      console.error("Could not close connections in time, forcefully shutting down");
+      process.exit(1);
+    }, 10000);
+  };
+
+  // Handle shutdown signals
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 };
 
 run().catch((error) => {

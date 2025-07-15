@@ -14,6 +14,8 @@ export interface Video {
 }
 
 export interface VideoPayload {
+  eventId: number;
+  eventDetailIndex: number;
   videoUrl: string;
   videoStartTime: string;
   videoPlayingTime: number;
@@ -31,15 +33,16 @@ export class SSEService {
     this.streamingData = container.streamingData;
   }
 
-  broadcastVideo(productCode: string, currentEvent: any, message: string): void {
+  broadcastVideo(productCode: string, currentEvent: any, message: string, index: number): void {
     const clientsForProduct = this.clients.filter((client) => client.gameId === productCode);
     console.log(
-      `Sent video to ${clientsForProduct.length} client(s) for product: ${productCode} with eventID: ${currentEvent.eventID} and message: ${message}`
+      `Sent video to ${clientsForProduct.length} client(s) for product: ${productCode} with eventID: ${currentEvent.eventID} index: ${index} and message: ${message}`
     );
 
     clientsForProduct.forEach((client) => {
       const payload: any = {
         eventId: currentEvent.eventID,
+        eventDetailIndex: index,
         videoUrl: currentEvent.playlist,
         videoStartTime: currentEvent.scheduleStartTs,
         videoPlayingTime: 0,
@@ -61,6 +64,8 @@ export class SSEService {
 
       const payload: VideoPayload = {
         message: "Broadcasted video on first connection",
+        eventId: currentEventDetail.eventID,
+        eventDetailIndex: currentEvent.index,
         videoUrl: currentEventDetail.playlist,
         videoStartTime: currentEventDetail.scheduleStartTs,
         videoLength: currentEventDetail.scheduleDuration,

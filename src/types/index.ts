@@ -7,6 +7,7 @@ import { SSEService } from "../services/sse-service";
 import { logger } from "sc-common";
 import { VideoService } from "../services/video-service";
 import { StreamingData } from "../services/streaming-data";
+import { BroadcastScheduler } from "../services/broadcast-scheduler";
 
 export interface AppContainer {
   sseService: SSEService;
@@ -18,4 +19,5 @@ export interface AppContainer {
   healthController: HealthController;
   videoService: VideoService;
   streamingData: StreamingData;
+  broadcastScheduler: BroadcastScheduler;
 }
