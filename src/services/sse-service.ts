@@ -1,7 +1,6 @@
 import { Response } from "express";
 import dayjs from "dayjs";
-import { ScheduleService } from "./schedule-service";
-import { AppContainer } from "../types";
+import { AppContainer, Event } from "../types";
 import { StreamingData } from "./streaming-data";
 
 export type SSEClient = { res: Response; gameId: string };
@@ -20,6 +19,7 @@ export interface VideoPayload {
   videoStartTime: string;
   videoPlayingTime: number;
   videoLength: number;
+  result: any;
   message?: string;
   gameId?: string;
 }
@@ -33,20 +33,23 @@ export class SSEService {
     this.streamingData = container.streamingData;
   }
 
-  broadcastVideo(productCode: string, currentEvent: any, message: string, index: number): void {
+  broadcastVideo(productCode: string, event: Event, message: string): void {
+    const currentEvent = event.eventDetails[event.currentEventDetailIndex];
     const clientsForProduct = this.clients.filter((client) => client.gameId === productCode);
     console.log(
-      `Sent video to ${clientsForProduct.length} client(s) for product: ${productCode} with eventID: ${currentEvent.eventID} index: ${index} and message: ${message}`
+      `Sent video to ${clientsForProduct.length} client(s) for product: ${productCode} with eventID: ${currentEvent.eventID} index: ${event.currentEventDetailIndex} and message: ${message}`
     );
 
     clientsForProduct.forEach((client) => {
-      const payload: any = {
+      const payload: VideoPayload = {
         eventId: currentEvent.eventID,
-        eventDetailIndex: index,
+        eventDetailIndex: event.currentEventDetailIndex,
         videoUrl: currentEvent.playlist,
         videoStartTime: currentEvent.scheduleStartTs,
         videoPlayingTime: 0,
+        videoLength: 0,
         message: message,
+        result: currentEvent.result,
       };
 
       client.res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -55,8 +58,9 @@ export class SSEService {
 
   public async addClient(res: Response, gameId: string): Promise<void> {
     this.clients.push({ res, gameId });
+
     const currentEvent = this.streamingData.currentEvents[gameId];
-    const currentEventDetail = currentEvent.eventDetails[currentEvent.index];
+    const currentEventDetail = currentEvent.eventDetails[currentEvent.currentEventDetailIndex];
 
     if (currentEventDetail) {
       const now = dayjs();
@@ -65,12 +69,13 @@ export class SSEService {
       const payload: VideoPayload = {
         message: "Broadcasted video on first connection",
         eventId: currentEventDetail.eventID,
-        eventDetailIndex: currentEvent.index,
+        eventDetailIndex: currentEvent.currentEventDetailIndex,
         videoUrl: currentEventDetail.playlist,
         videoStartTime: currentEventDetail.scheduleStartTs,
-        videoLength: currentEventDetail.scheduleDuration,
+        videoLength: 0,
         videoPlayingTime: secondsPassed,
         gameId: gameId,
+        result: currentEventDetail.result,
       };
 
       console.log(`Broadcasted video on first connection for game ${gameId}`);

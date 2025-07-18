@@ -21,3 +21,27 @@ export interface AppContainer {
   streamingData: StreamingData;
   broadcastScheduler: BroadcastScheduler;
 }
+
+export type Event = {
+  eventID: number;
+  eventNameAKey: string;
+  eventNameBKey: string;
+  theme?: string;
+  scheduleStartTs: string;
+  productCode: string;
+  productTypeKey: string;
+  eventDetails: EventDetail[];
+  currentEventDetailIndex: number;
+};
+
+export type EventDetail = {
+  eventID: number;
+  oddsAvailableTs: string;
+  scheduleStartTs: string;
+  resultsAvailableTs: string;
+  hasResults: boolean;
+  goalInfo: string;
+  playlist: string;
+  result: any;
+  selections: any;
+};

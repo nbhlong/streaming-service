@@ -1,7 +1,15 @@
 import { appConfigs } from "../app-configs";
 import { retry } from "../helpers/retry";
+import { Event } from "../types";
+import { logger } from "sc-common";
 
 export class ScheduleService {
+  private readonly logService: typeof logger;
+
+  constructor(logService: typeof logger) {
+    this.logService = logService;
+  }
+
   private token = "";
 
   async getOddsFeedToken() {
@@ -39,15 +47,16 @@ export class ScheduleService {
     return data;
   }
 
-  async getScheduleWithRetry() {
+  async getScheduleWithRetry(): Promise<Event[]> {
     try {
       return await retry(() => this.getSchedule());
     } catch (error) {
-      console.error("Failed to get schedule: ", error);
+      this.logService.logError(`Failed to get schedule: ${error}`);
+      return [];
     }
   }
 
-  private async getEventDetails(eventId: number) {
+  private async getEventDetails(eventId: number): Promise<Event | null> {
     const token = this.token || (await this.getOddsFeedToken());
 
     const response = await fetch(`${appConfigs.oddsFeedAPI.url}/api/events?eventID=${eventId}`, {
@@ -65,11 +74,12 @@ export class ScheduleService {
     return data;
   }
 
-  async getEventDetailsWithRetry(eventId: number) {
+  async getEventDetailsWithRetry(eventId: number): Promise<Event | null> {
     try {
       return await retry(() => this.getEventDetails(eventId));
     } catch (error) {
-      console.error("Failed to get event details: ", error);
+      this.logService.logError(`Failed to get event details: ${error}`);
+      return null;
     }
   }
 }

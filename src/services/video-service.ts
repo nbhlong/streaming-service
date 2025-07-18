@@ -1,10 +1,13 @@
 import { logger } from "sc-common";
-import { AppContainer } from "../types";
+import { AppContainer, EventDetail } from "../types";
 import { ScheduleService } from "./schedule-service";
 import cron from "cron";
 import { SSEService } from "./sse-service";
 import { StreamingData } from "./streaming-data";
 import { BroadcastScheduler } from "./broadcast-scheduler";
+import { extractRoundId } from "../helpers/id-helper";
+
+const scheduleDelay = 10 * 1000;
 
 export class VideoService {
   private readonly scheduleService: ScheduleService;
@@ -22,11 +25,10 @@ export class VideoService {
   }
 
   async start() {
-    this.streamingData.nextEvents = await this.getNextEventsForEachProduct();
-    this.streamingData.currentEvents = await this.getCurrentEvents();
+    const currentEventIDs = await this.getCurrentEventIDsOfAllProducts();
 
-    Object.keys(this.streamingData.currentEvents).forEach((productCode) => {
-      this.scheduleCurrentEvents(productCode);
+    currentEventIDs.forEach((eventID) => {
+      this.firstUpdateCurrentEvent(eventID);
     });
 
     this.startCron();
@@ -46,91 +48,144 @@ export class VideoService {
   }
 
   async schedule() {
-    this.streamingData.nextEvents = await this.getNextEventsForEachProduct();
-    Object.keys(this.streamingData.nextEvents).forEach((productCode) => {
-      if (!this.streamingData.currentEvents[productCode]) {
-        this.streamingData.currentEvents[productCode] = this.streamingData.nextEvents[productCode];
-        this.scheduleCurrentEvents(productCode);
-      }
+    const nextEventIDs = await this.getNextEventIDsForEachProduct();
+
+    this.handleScheduleEvents(Object.values(nextEventIDs));
+  }
+
+  handleScheduleEvents(eventIDs: number[]) {
+    eventIDs.forEach((eventID) => {
+      this.handleScheduleEvent(eventID);
     });
   }
 
-  async scheduleCurrentEvents(productCode: string) {
-    const event = this.streamingData.currentEvents[productCode];
-    const updateEvent = await this.scheduleService.getEventDetailsWithRetry(event.eventID);
+  async firstUpdateCurrentEvent(eventID: number) {
+    const updateEvent = await this.scheduleService.getEventDetailsWithRetry(eventID);
+
+    if (!updateEvent) {
+      this.logService.logError(`Event ${eventID} not found`);
+      console.error(`Event ${eventID} not found`);
+      return;
+    }
+
+    const productCode = updateEvent.productCode;
+    let currentEventDetailIndex = 0;
     this.streamingData.currentEvents[productCode] = updateEvent;
 
-    let currentIndex = 0;
-    updateEvent.eventDetails.forEach((eventDetail: any, index: number) => {
+    updateEvent.eventDetails.forEach((eventDetail, index) => {
       this.handleOddsAvailableForEventDetail(eventDetail, index, productCode);
       this.handleVideoInfoAvailableForEventDetail(eventDetail, index, productCode);
       this.handleResultAvailableForEventDetail(eventDetail, index, productCode);
+
       if (Date.now() > new Date(eventDetail.resultsAvailableTs).getTime()) {
-        currentIndex++;
+        currentEventDetailIndex++;
       }
     });
 
-    this.streamingData.currentEvents[productCode].index = currentIndex;
+    this.streamingData.currentEvents[productCode].currentEventDetailIndex = Math.min(
+      currentEventDetailIndex,
+      updateEvent.eventDetails.length - 1
+    );
   }
 
-  handleOddsAvailableForEventDetail(eventDetail: any, index: number, productCode: string) {
+  async handleScheduleEvent(eventID: number) {
+    const updateEvent = await this.scheduleService.getEventDetailsWithRetry(eventID);
+
+    if (!updateEvent) {
+      this.logService.logError(`Event ${eventID} not found`);
+      console.error(`Event ${eventID} not found`);
+      return;
+    }
+
+    const scheduledTime = new Date(new Date(updateEvent.scheduleStartTs).getTime() + scheduleDelay);
+    const productCode = updateEvent.productCode;
+    const jobId = this.generateJobId(productCode, eventID, 0, "schedule");
+
+    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
+      this.streamingData.currentEvents[productCode] = updateEvent;
+      this.streamingData.currentEvents[productCode].currentEventDetailIndex = 0;
+
+      updateEvent.eventDetails.forEach((eventDetail, index) => {
+        const event = { ...eventDetail };
+
+        this.handleOddsAvailableForEventDetail(event, index, productCode);
+        this.handleVideoInfoAvailableForEventDetail(event, index, productCode);
+        this.handleResultAvailableForEventDetail(event, index, productCode);
+      });
+
+      this.sseService.broadcastVideo(productCode, updateEvent, "schedule event");
+    });
+  }
+
+  async handleOddsAvailableForEventDetail(eventDetail: EventDetail, index: number, productCode: string) {
     const scheduledTime = new Date(eventDetail.oddsAvailableTs);
-    const jobId = this.generateJobId(productCode, this.streamingData.currentEvents[productCode].eventID, index, "odds");
+    const jobId = this.generateJobId(productCode, eventDetail.eventID, index, "odds");
 
     this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
-      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
-        this.streamingData.currentEvents[productCode].eventID
-      );
-      this.streamingData.currentEvents[productCode] = updateEvent;
+      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(eventDetail.eventID);
 
-      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "odds available", index);
-    });
-  }
-
-  handleVideoInfoAvailableForEventDetail(eventDetail: any, index: number, productCode: string) {
-    const scheduledTime = new Date(eventDetail.scheduleStartTs);
-    const jobId = this.generateJobId(productCode, this.streamingData.currentEvents[productCode].eventID, index, "video");
-
-    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
-      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
-        this.streamingData.currentEvents[productCode].eventID
-      );
-      this.streamingData.currentEvents[productCode] = updateEvent;
-      this.streamingData.currentEvents[productCode].index = index;
-
-      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "video info available", index);
-    });
-  }
-
-  handleResultAvailableForEventDetail(eventDetail: any, index: number, productCode: string) {
-    const scheduledTime = new Date(eventDetail.resultsAvailableTs);
-    const jobId = this.generateJobId(productCode, this.streamingData.currentEvents[productCode].eventID, index, "result");
-
-    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
-      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(
-        this.streamingData.currentEvents[productCode].eventID
-      );
-      this.streamingData.currentEvents[productCode] = updateEvent;
-
-      this.sseService.broadcastVideo(productCode, updateEvent.eventDetails[index], "result available", index);
-
-      if (
-        index === updateEvent.eventDetails.length - 1 &&
-        this.streamingData.currentEvents[productCode].eventID < this.streamingData.nextEvents[productCode].eventID
-      ) {
-        this.streamingData.currentEvents[productCode] = this.streamingData.nextEvents[productCode];
-        this.scheduleCurrentEvents(productCode);
+      if (!updateEvent) {
+        return;
       }
+
+      updateEvent.currentEventDetailIndex = index;
+      this.streamingData.currentEvents[productCode] = updateEvent;
+
+      this.sseService.broadcastVideo(productCode, updateEvent, "odds available");
     });
   }
 
-  async getNextEventsForEachProduct() {
+  async handleVideoInfoAvailableForEventDetail(eventDetail: EventDetail, index: number, productCode: string) {
+    const scheduledTime = new Date(eventDetail.scheduleStartTs);
+    const jobId = this.generateJobId(productCode, eventDetail.eventID, index, "video");
+
+    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
+      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(eventDetail.eventID);
+
+      if (!updateEvent) {
+        return;
+      }
+
+      updateEvent.currentEventDetailIndex = index;
+      this.streamingData.currentEvents[productCode] = updateEvent;
+
+      this.sseService.broadcastVideo(productCode, updateEvent, "video info available");
+    });
+  }
+
+  async handleResultAvailableForEventDetail(eventDetail: EventDetail, index: number, productCode: string) {
+    const scheduledTime = new Date(eventDetail.resultsAvailableTs);
+    const jobId = this.generateJobId(productCode, eventDetail.eventID, index, "result");
+
+    this.broadcastScheduler.scheduleJob(jobId, scheduledTime, async () => {
+      const updateEvent = await this.scheduleService.getEventDetailsWithRetry(eventDetail.eventID);
+
+      if (!updateEvent) {
+        return;
+      }
+
+      this.streamingData.currentEvents[productCode] = updateEvent;
+      this.streamingData.currentEvents[productCode].currentEventDetailIndex = Math.min(
+        index + 1,
+        updateEvent.eventDetails.length - 1
+      );
+
+      this.sseService.broadcastVideo(productCode, { ...updateEvent, currentEventDetailIndex: index }, "result available");
+    });
+  }
+
+  async getUpcomingEventIDs() {
+    const upcomingEvents = await this.scheduleService.getScheduleWithRetry();
+    return upcomingEvents.map((event) => event.eventID);
+  }
+
+  async getNextEventIDsForEachProduct() {
     const allUpComingEvents = await this.scheduleService.getScheduleWithRetry();
 
-    const nextEvents = allUpComingEvents.reduce((events: any, event: any) => {
+    const nextEvents = allUpComingEvents.reduce((events: Record<string, number>, event) => {
       const code = event.productCode;
-      if (!events[code] || event.eventID < events[code].eventID) {
-        events[code] = event;
+      if (!events[code] || event.eventID < events[code]) {
+        events[code] = event.eventID;
       }
       return events;
     }, {});
@@ -138,24 +193,15 @@ export class VideoService {
     return nextEvents;
   }
 
-  async getCurrentEvents() {
-    const events = await this.getNextEventsForEachProduct();
+  async getCurrentEventIDsOfAllProducts(): Promise<number[]> {
+    const nextEventIDs = await this.getNextEventIDsForEachProduct();
 
-    Object.keys(events).forEach((productCode) => {
-      events[productCode].eventID = events[productCode].eventID - 1;
+    const currentEventIDs = Object.values(nextEventIDs).map((eventID) => {
+      const roundId = extractRoundId(eventID);
+      return roundId > 1 ? eventID - 1 : eventID;
     });
 
-    return events;
-  }
-
-  getBroadcastData() {
-    return this.streamingData.currentEvents.map((event: any) => {
-      return {
-        productCode: event.productCode,
-        eventID: event.eventID,
-        index: event.index,
-      };
-    });
+    return currentEventIDs;
   }
 
   cleanup() {

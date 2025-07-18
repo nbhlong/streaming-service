@@ -1,4 +1,5 @@
+import { Event } from "../types";
+
 export class StreamingData {
-  nextEvents: Record<string, any> = {};
-  currentEvents: Record<string, any> = {};
+  currentEvents: Record<string, Event> = {};
 }
